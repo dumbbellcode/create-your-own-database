@@ -1,41 +1,55 @@
-export class HashIndex {
-    private index: Map<string, number[]>;
+import { SegmentLimitExceeded } from "./errors/segment-limit-exceeded";
+import { Segment } from "./segment";
 
-    constructor() {
-        this.index = new Map<string, number[]>();
-    }
-
+interface HashIndexConfig {
+  segmentMaxBytes: number;
 }
 
+export class HashIndex {
+  private segments: Segment[] = [];
 
-/** 
-Entities:
-Segment:
-  - location: string (file path)
-  - index: Map<string, number> (map keys to offsets)
-  - get(key: string): string | null
-  - set(key: string, value: string): void
+  constructor(private config: HashIndexConfig) {
+  }
 
-HasIndex: 
-  - segments: Segment[]
-  - set(key: string, value: string): void
-  - get(key: string): string | null
-  - compact(): void
+  public set(key: string, value: string): void {
+    let currentSegment = this.segments[this.segments.length - 1];
 
+    if (!currentSegment) {
+      currentSegment = new Segment(
+        `segment_${this.segments.length}.dat`,
+        this.config.segmentMaxBytes,
+      );
+      this.segments.push(currentSegment);
+    }
 
-Operations:
-1. set(key: string, value: string): void
-2. get(key: string): string | null
+    try {
+      currentSegment.set(key, value);
+    } catch (e) {
+      if (e instanceof SegmentLimitExceeded) {
+        const newSegment = new Segment(
+          `segment_${this.segments.length}.dat`,
+          this.config.segmentMaxBytes,
+        );
+        this.segments.push(newSegment);
+        newSegment.set(key, value);
+      } else {
+        throw e;
+      }
+    }
+  }
 
-Internal Instance Variables:
-1. inMemoryIndex: Map<string, number> : Maps keys to their file offsets
+  public get(key: string): string | null {
+    for (let i = this.segments.length - 1; i >= 0; i--) {
+      const segment = this.segments[i]!;
+      const value = segment.get(key);
+      if (value !== null) {
+        return value;
+      }
+    }
+    return null;
+  }
 
-Internal Operations:
-1. compact(): void
-
-Config:
-1. Segment Size: File size in bytes
-2. 
-
-
- */
+  public getSegments(): Segment[] {
+    return this.segments;
+  }
+}
